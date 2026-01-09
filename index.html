@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>超級范寬：谿山行旅圖</title>
+
+    <!-- PWA -->
+    <link rel="manifest" href="manifest.webmanifest">
+    <meta name="theme-color" content="#2b2b2b">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <style>
+        body {
+            margin: 0;
+            background-color: #2b2b2b;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: "標楷體", "KaiTi", serif;
+            color: #333;
+        }
+        #game-container {
+            position: relative;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+        canvas {
+            background-color: #e6dcc3;
+            display: block;
+        }
+        #ui-layer {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            pointer-events: none;
+        }
+        .ink-text {
+            font-size: 24px;
+            font-weight: bold;
+            color: #1a1a1a;
+            text-shadow: 2px 2px 0 rgba(200,200,200,0.5);
+        }
+        #message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 40px;
+            background: rgba(255,255,255,0.9);
+            padding: 20px;
+            border: 4px double #000;
+            display: none;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+
+    <div id="ui-layer">
+        <div class="ink-text">谿山行旅</div>
+        <div style="font-size:16px;margin-top:5px;">
+            操作：左右鍵移動，空白鍵跳躍
+        </div>
+    </div>
+
+    <div id="message"></div>
+</div>
+
+<script>
+/* ================== Service Worker ================== */
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js');
+}
+
+/* ================== 遊戲程式 ================== */
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const msgDiv = document.getElementById('message');
+
+let gameState = 'playing';
+
+const gravity = 0.5;
+const friction = 0.8;
+
+const player = {
+    x: 50, y: 500,
+    width: 20, height: 30,
+    dx: 0, dy: 0,
+    speed: 5,
+    jumpPower: -12,
+    grounded: false,
+    color: '#8B4513'
+};
+
+const hiddenSignature = {
+    x: 720, y: 480,
+    width: 40, height: 60
+};
+
+const platforms = [
+    { x: 0, y: 550, w: 800, h: 50 },
+    { x: 200, y: 450, w: 100, h: 20 },
+    { x: 350, y: 380, w: 150, h: 20 },
+    { x: 550, y: 300, w: 100, h: 20 },
+    { x: 400, y: 200, w: 120, h: 20 },
+    { x: 250, y: 150, w: 80, h: 20 },
+    { x: 100, y: 100, w: 100, h: 20 },
+    { x: 650, y: 520, w: 150, h: 20 }
+];
+
+const keys = { left:false, right:false, up:false };
+
+document.addEventListener('keydown', e => {
+    if (gameState !== 'playing' && e.code === 'Space') resetGame();
+    if (e.code === 'ArrowLeft') keys.left = true;
+    if (e.code === 'ArrowRight') keys.right = true;
+    if (e.code === 'Space') keys.up = true;
+});
+document.addEventListener('keyup', e => {
+    if (e.code === 'ArrowLeft') keys.left = false;
+    if (e.code === 'ArrowRight') keys.right = false;
+    if (e.code === 'Space') keys.up = false;
+});
+
+function resetGame() {
+    Object.assign(player,{x:50,y:500,dx:0,dy:0});
+    gameState = 'playing';
+    msgDiv.style.display = 'none';
+    loop();
+}
+
+function drawBackground() {
+    ctx.fillStyle = 'rgba(40,40,40,0.1)';
+    ctx.beginPath();
+    ctx.moveTo(100,600);
+    ctx.lineTo(400,50);
+    ctx.lineTo(700,600);
+    ctx.fill();
+
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(410,50,10,300);
+
+    ctx.fillStyle = 'rgba(230,220,195,0.7)';
+    ctx.fillRect(0,250,800,50);
+}
+
+function draw() {
+    ctx.clearRect(0,0,800,600);
+    drawBackground();
+
+    ctx.fillStyle = '#2F4F4F';
+    platforms.forEach(p => ctx.fillRect(p.x,p.y,p.w,p.h));
+
+    ctx.fillStyle = '#006400';
+    ctx.beginPath();
+    ctx.arc(hiddenSignature.x+20,hiddenSignature.y,30,0,Math.PI*2);
+    ctx.fill();
+
+    ctx.fillStyle = player.color;
+    ctx.fillRect(player.x,player.y,player.width,player.height);
+}
+
+function update() {
+    if (keys.right) player.dx = player.speed;
+    else if (keys.left) player.dx = -player.speed;
+    else player.dx *= friction;
+
+    if (keys.up && player.grounded) {
+        player.dy = player.jumpPower;
+        player.grounded = false;
+    }
+
+    player.dy += gravity;
+    player.x += player.dx;
+    player.y += player.dy;
+
+    player.grounded = false;
+    platforms.forEach(p=>{
+        if (player.x < p.x+p.w &&
+            player.x+player.width > p.x &&
+            player.y+player.height > p.y &&
+            player.y+player.height < p.y+p.h+10 &&
+            player.dy >= 0) {
+            player.grounded = true;
+            player.dy = 0;
+            player.y = p.y-player.height;
+        }
+    });
+
+    if (player.x > hiddenSignature.x &&
+        player.y > hiddenSignature.y-50) {
+        gameState='won';
+        msgDiv.innerHTML='發現「范寬」二字！<br>按空白鍵重來';
+        msgDiv.style.display='block';
+    }
+}
+
+function loop(){
+    if(gameState==='playing'){
+        update();
+        draw();
+        requestAnimationFrame(loop);
+    }
+}
+loop();
+</script>
+</body>
+</html>
